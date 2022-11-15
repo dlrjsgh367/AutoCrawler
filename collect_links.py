@@ -1,19 +1,15 @@
 """
 Copyright 2018 YoongiKim
-
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
    You may obtain a copy of the License at
-
        http://www.apache.org/licenses/LICENSE-2.0
-
    Unless required by applicable law or agreed to in writing, software
    distributed under the License is distributed on an "AS IS" BASIS,
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
 """
-
 import time
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
@@ -25,7 +21,33 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 import os.path as osp
+from threading import Thread
+import functools
 
+def timeout(timeout):
+    def deco(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            res = [Exception('function [%s] timeout [%s seconds] exceeded!' % (func.__name__, timeout))]
+            def newFunc():
+                try:
+                    res[0] = func(*args, **kwargs)
+                except Exception as e:
+                    res[0] = e
+            t = Thread(target=newFunc)
+            t.daemon = True
+            try:
+                t.start()
+                t.join(timeout)
+            except Exception as je:
+                print ('error starting thread')
+                raise je
+            ret = res[0]
+            if isinstance(ret, BaseException):
+                raise ret
+            return ret
+        return wrapper
+    return deco
 
 class CollectLinks:
     def __init__(self, no_gui=False, proxy=None):
@@ -215,12 +237,27 @@ class CollectLinks:
 
         last_scroll = 0
         scroll_patience = 0
+        state = ''
+        patience = 0
 
         while True:
             try:
-                xpath = '//div[@id="islsp"]//div[@class="v4dQwb"]'
+                xpath = '//div[@class = "tvh9oe BIB1wf"]'
+                div_changed = self.browser.find_element(By.XPATH, xpath)
+                if state == div_changed.get_attribute('data-tbnid'):
+                    print('으악')
+                    patience+=1
+                    if patience>30:
+                        break
+                else:
+                    state = div_changed.get_attribute('data-tbnid')
+                    patience=0
+
+
+                xpath = '//div[@id="islsp"]//div[@class="v4dQwb"]' # class : l39u4d
                 div_box = self.browser.find_element(By.XPATH, xpath)
                 self.highlight(div_box)
+
 
                 xpath = '//img[@class="n3VNCb"]'
                 img = div_box.find_element(By.XPATH, xpath)
@@ -232,13 +269,12 @@ class CollectLinks:
                 # Wait for image to load. If not it will display base64 code.
                 while str(loading_bar.get_attribute('style')) != 'display: none;':
                     time.sleep(0.1)
-
+                
                 src = img.get_attribute('src')
-
                 if src is not None:
                     links.append(src)
                     print('%d: %s' % (count, src))
-                    count += 1
+                    count+=1
 
             except StaleElementReferenceException:
                 # print('[Expected Exception - StaleElementReferenceException]')
@@ -246,18 +282,10 @@ class CollectLinks:
             except Exception as e:
                 print('[Exception occurred while collecting links from google_full] {}'.format(e))
 
-            scroll = self.get_scroll()
-            if scroll == last_scroll:
-                scroll_patience += 1
-            else:
-                scroll_patience = 0
-                last_scroll = scroll
 
-            if scroll_patience >= 30:
-                break
 
             elem.send_keys(Keys.RIGHT)
-
+        
         links = self.remove_duplicates(links)
 
         print('Collect links done. Site: {}, Keyword: {}, Total: {}'.format('google_full', keyword, len(links)))
@@ -284,7 +312,7 @@ class CollectLinks:
 
         last_scroll = 0
         scroll_patience = 0
-
+        patience = 0
         while True:
             try:
                 xpath = '//div[@class="image _imageBox"]/img[@class="_image"]'
@@ -293,18 +321,20 @@ class CollectLinks:
                 for img in imgs:
                     self.highlight(img)
                     src = img.get_attribute('src')
-
                     if src not in links and src is not None:
                         links.append(src)
                         print('%d: %s' % (count, src))
-                        count += 1
+                        count+=1
+                        patience=0
+                    else:
+                        patience +=1
 
             except StaleElementReferenceException:
                 # print('[Expected Exception - StaleElementReferenceException]')
                 pass
             except Exception as e:
                 print('[Exception occurred while collecting links from naver_full] {}'.format(e))
-
+                
             scroll = self.get_scroll()
             if scroll == last_scroll:
                 scroll_patience += 1
@@ -314,7 +344,8 @@ class CollectLinks:
 
             if scroll_patience >= 100:
                 break
-
+            if patience >= 100:
+                break
             elem.send_keys(Keys.RIGHT)
             elem.send_keys(Keys.PAGE_DOWN)
 
